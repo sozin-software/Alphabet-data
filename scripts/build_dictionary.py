@@ -26,7 +26,7 @@ from collections import defaultdict
 import orjson
 from wordfreq import zipf_frequency
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value NOT NULL) WITHOUT ROWID;
@@ -382,13 +382,27 @@ def read_wiktionary(path, stats):
             if not entry["senses"]:
                 stats["link_only_entries"] += 1
                 continue
-            if is_empty_name(d, entry) and freq(word) < NAME_FREQ_KEEP:
+            empty = is_empty_name(d, entry)
+            if empty and freq(word) < NAME_FREQ_KEEP:
                 stats["empty_names_dropped"] += 1
                 continue
             entry["_sunk"] = sunk
+            entry["_empty_name"] = empty
             words[word].append(entry)
             if rhyme and word not in rhymes and " " not in word:
                 rhymes[word] = rhyme
+    # wordfreq counts words in lower case, so "Yellow" (a surname) looked as common as the colour.
+    # An empty name kept for its frequency goes if the lower-case word is in the dictionary.
+    for word in list(words):
+        kept = [e for e in words[word] if not (e["_empty_name"] and word.lower() != word and word.lower() in words)]
+        stats["empty_names_dropped"] += len(words[word]) - len(kept)
+        for e in kept:
+            e.pop("_empty_name")
+        if kept:
+            words[word] = kept
+        else:
+            del words[word]
+            rhymes.pop(word, None)
     return words, rhymes, links
 
 
