@@ -1,0 +1,43 @@
+name: Build and publish the dictionary
+
+# Builds Alphabet's dictionary from the free sources and publishes it as a release, which the
+# app downloads (releases/latest/download/alphabet-<schema>.db.gz). Run by hand from the
+# Actions tab, or by pushing a change to scripts/.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/**", ".github/workflows/publish.yml"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install tools
+        run: pip install orjson==3.13.0 wordfreq==3.1.1
+      - name: Download the sources
+        run: bash scripts/download_sources.sh "$RUNNER_TEMP/raw"
+      - name: Build
+        run: |
+          python scripts/build_dictionary.py "$RUNNER_TEMP/raw" "$RUNNER_TEMP/alphabet.db"
+          SCHEMA=$(grep -E '^SCHEMA_VERSION = ' scripts/build_dictionary.py | sed -E 's/[^0-9]//g')
+          gzip -9 -c "$RUNNER_TEMP/alphabet.db" > "alphabet-$SCHEMA.db.gz"
+          echo "SCHEMA=$SCHEMA" >> "$GITHUB_ENV"
+          ls -la alphabet-*.db.gz
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="dictionary-v$SCHEMA-$(date -u +%Y%m%d-%H%M)"
+          gh release create "$TAG" "alphabet-$SCHEMA.db.gz" LICENSE \
+            --title "Dictionary $(date -u +%Y-%m-%d) (format $SCHEMA)" \
+            --notes "Alphabet's offline dictionary. CC BY-SA 4.0: adapted from Wiktionary (CC BY-SA), Open English WordNet (CC BY 4.0), Moby Thesaurus (public domain) and wordfreq (CC BY-SA 4.0)." \
+            --latest
