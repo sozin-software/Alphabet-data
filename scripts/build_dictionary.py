@@ -26,7 +26,7 @@ from collections import defaultdict
 import orjson
 from wordfreq import zipf_frequency
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value NOT NULL) WITHOUT ROWID;
@@ -64,6 +64,8 @@ SINK_TAGS = {
     "obsolete", "archaic", "rare", "dated", "nonstandard", "misspelling", "proscribed",
     "historical", "uncommon", "dialectal", "obsolete-in-sense",
 }
+# Countries a spelling is used in.
+NATION_TAGS = {"US", "UK", "British", "Commonwealth", "Ireland", "Canada", "Australia", "New-Zealand", "India", "South-Africa"}
 # Tags shown as labels when Wiktionary gives no written label.
 LABEL_TAGS = {
     "informal", "slang", "archaic", "obsolete", "dated", "rare", "US", "UK", "British",
@@ -331,7 +333,8 @@ def slim_entry(d):
             continue
         seen.add(form)
         if "alternative" in tags:
-            alts.append(form)
+            # Kept with the countries it's used in ("galvanise": UK), for the word page's GBR/USA tag.
+            alts.append({"f": form, "t": [t for t in tags if t in NATION_TAGS]} if any(t in NATION_TAGS for t in tags) else {"f": form})
         elif not ({"romanization", "obsolete", "archaic"} & set(tags)):
             forms.append({"f": form, "t": [t for t in tags if t not in ("canonical",)]})
 
@@ -604,7 +607,8 @@ def build(raw_dir, out_path):
         for e in entries:
             for f in e.get("forms", []):
                 rows.setdefault((norm(f["f"]), ids[word], f["f"]), form_kind(set(f["t"])))
-            for a in e.get("alt", []):
+            for alt in e.get("alt", []):
+                a = alt["f"]
                 rows.setdefault((norm(a), ids[word], a), "alternative spelling of")
     rows = [(*k, v) for k, v in rows.items() if k[0]]
     db.executemany("INSERT OR IGNORE INTO form VALUES (?,?,?,?)", rows)
